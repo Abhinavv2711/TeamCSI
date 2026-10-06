@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WifiSense — Smart Home Ecosystem</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+    tailwind.config = {
+        darkMode: 'class',
+        theme: {
+            extend: {
+                fontFamily: {
+                    sans: ['Inter', 'sans-serif'],
+                    mono: ['"JetBrains Mono"', 'monospace'],
+                },
+            },
+        },
+    };
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<style type="text/tailwindcss">
+    .card { @apply rounded-3xl border border-stone-200/90 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04] dark:shadow-none; }
+    .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold; }
+</style>
+
+<style>
+    html { scroll-behavior: smooth; }
+
+    .view { display: none; }
+    .view.active { display: block; }
+
+    @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(16px); }
+        to { opacity: 1; transform: none; }
+    }
+    .view.active > * { animation: fadeUp .5s cubic-bezier(.16, 1, .3, 1) both; }
+    .view.active > :nth-child(1) { animation-delay: .03s; }
+    .view.active > :nth-child(2) { animation-delay: .09s; }
+    .view.active > :nth-child(3) { animation-delay: .15s; }
+
+    @keyframes riseIn {
+        from { opacity: 0; transform: translateY(7px); }
+        to { opacity: 1; transform: none; }
+    }
+    .swap { animation: riseIn .35s ease both; }
+
+    @keyframes toastIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    @keyframes toastOut { to { opacity: 0; transform: translateX(24px); } }
+    .toast-enter { animation: toastIn .35s cubic-bezier(.16, 1, .3, 1) both; }
+    .toast-exit { animation: toastOut .3s ease forwards; }
+
+    input[type="range"] { accent-color: #059669; }
+    .dark input[type="range"] { accent-color: #34d399; }
+
+    @keyframes intruder-flash {
+        0%, 100% { background-color: transparent; }
+        50% { background-color: rgba(239, 68, 68, 0.10); }
+    }
+    .intruder-alert { animation: intruder-flash 1.2s ease-in-out infinite; border-color: rgb(239, 68, 68) !important; }
+
+    /* ---- Floor plan ---- */
+    .room {
+        fill: rgba(120, 113, 108, 0.06);
+        stroke: rgba(120, 113, 108, 0.35);
+        stroke-width: 1.5;
+        transition: fill .6s ease, stroke .6s ease;
+    }
+    .dark .room { fill: rgba(255, 255, 255, 0.03); stroke: rgba(255, 255, 255, 0.18); }
+    .room-label { font-size: 13px; font-weight: 600; fill: #78716c; transition: fill .6s ease; }
+    .dark .room-label { fill: #a8a29e; }
+    .room-sub { font-size: 10px; fill: #a8a29e; }
+    .room.active-moving { fill: rgba(245, 158, 11, 0.15); stroke: rgba(245, 158, 11, 0.85); }
+    .room.active-sleeping { fill: rgba(59, 130, 246, 0.15); stroke: rgba(59, 130, 246, 0.85); }
+
+    .sensor-pulse {
+        transform-origin: center;
+        transform-box: fill-box;
+        animation: pingRing 2.4s cubic-bezier(0, 0, .2, 1) infinite;
+    }
+    @keyframes pingRing {
+        0% { transform: scale(.55); opacity: .85; }
+        80%, 100% { transform: scale(2.4); opacity: 0; }
+    }
+
+    /* ---- Terminal ---- */
+    #terminalBody::-webkit-scrollbar { width: 8px; }
+    #terminalBody::-webkit-scrollbar-thumb { background: rgba(52, 211, 153, 0.25); border-radius: 4px; }
+    .term-line { animation: termFade .25s ease both; }
+    @keyframes termFade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+    /* ---- Vitals lock-on ---- */
+    @keyframes lockPulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45); }
+        50% { box-shadow: 0 0 0 7px rgba(59, 130, 246, 0); }
+    }
+    .vitals-lock-dot { animation: lockPulse 1.8s ease-in-out infinite; }
+
+    /* ---- Explainer pipeline diagrams ---- */
+    .fbox {
+        fill: rgba(16, 185, 129, 0.05);
+        stroke: rgba(16, 185, 129, 0.40);
+        stroke-width: 1.5;
+        transition: fill .5s ease;
+    }
+    .dark .fbox { fill: rgba(52, 211, 153, 0.06); stroke: rgba(52, 211, 153, 0.30); }
+    .ftext { font-size: 11.5px; font-weight: 700; fill: #57534e; }
+    .dark .ftext { fill: #d6d3d1; }
+    .fsub { font-size: 9px; fill: #a8a29e; }
+    .farrow { stroke: #b8b2aa; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+    .dark .farrow { stroke: #57534e; }
+
+    .code-block {
+        background: #0A0F0C;
+        color: #d1d5db;
+        border-radius: 0.9rem;
+        padding: 1rem 1.15rem;
+        overflow-x: auto;
+    }
+    .code-block .k { color: #34d399; }
+    .code-block .c { color: #6b7280; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .view.active > *, .swap, .toast-enter, .term-line { animation: none !important; }
+    }
+</style>
+</head>
+<body class="min-h-screen bg-[#F4F3EE] font-sans text-stone-900 antialiased dark:bg-[#0B0E0C] dark:text-stone-100">
+
+<div class="mx-auto flex max-w-[1440px]">
+
+    <!-- Sidebar -->
+    <aside class="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-8 border-r border-stone-200/90 px-5 py-7 dark:border-white/10 lg:flex">
+        <div class="flex items-center gap-3">
+            <div class="relative h-10 w-10">
+                <span class="absolute left-0 top-1 h-5 w-5 rounded-full bg-emerald-600/80"></span>
+                <span class="absolute right-0 top-0 h-3 w-3 rounded-full bg-emerald-400/70"></span>
+                <span class="absolute bottom-0 right-2 h-2.5 w-2.5 rounded-full bg-lime-500/60"></span>
+                <span class="absolute bottom-1 left-2 h-4 w-4 rounded-full border-2 border-emerald-700/50"></span>
+            </div>
+            <div>
+                <p class="font-bold leading-tight tracking-tight">WifiSense</p>
+                <p class="text-xs text-stone-500 dark:text-stone-400">Home ecosystem</p>
+            </div>
+        </div>
+
+        <nav class="flex flex-col gap-1 text-sm font-medium">
+            <a href="#/" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="layout-dashboard" class="h-4 w-4"></i> Overview
+            </a>
+            <a href="#/floorplan" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="map" class="h-4 w-4"></i> Floor plan
+            </a>
+            <a href="#/devices" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="plug-zap" class="h-4 w-4"></i> Devices
+            </a>
+            <a href="#/terminal" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="terminal" class="h-4 w-4"></i> Terminal
+            </a>
+            <a href="#/activity" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="history" class="h-4 w-4"></i> Activity
+            </a>
+
+            <p class="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-widest text-stone-400">Theory</p>
+            <a href="#/health" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="heart-pulse" class="h-4 w-4"></i> Health
+            </a>
+            <a href="#/security" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="shield" class="h-4 w-4"></i> Security
+            </a>
+            <a href="#/eco" class="nav-link flex items-center gap-3 rounded-xl px-3 py-2.5">
+                <i data-lucide="leaf" class="h-4 w-4"></i> Eco
+            </a>
+        </nav>
+
+        <div class="mt-auto flex items-center gap-2 rounded-2xl border border-stone-200/90 bg-white p-3 text-xs text-stone-500 shadow-sm dark:border-white/10 dark:bg-white/[0.04] dark:text-stone-400">
+            <span id="sideDot" class="h-2 w-2 rounded-full bg-stone-400"></span>
+            <span id="sideConnText">Connecting…</span>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="min-w-0 flex-1 px-5 pb-12 pt-6 sm:px-8">
+
+        <!-- Mobile top bar -->
+        <div class="mb-4 flex items-center justify-between lg:hidden">
+            <div class="flex items-center gap-2">
+                <span class="h-6 w-6 rounded-full bg-emerald-600/80"></span>
+                <span class="font-bold">WifiSense</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="themeToggleMobile" class="rounded-full border border-stone-200/90 bg-white p-2 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                    <i data-lucide="moon" class="hidden h-4 w-4 dark:block"></i>
+                    <i data-lucide="sun" class="block h-4 w-4 dark:hidden"></i>
+                </button>
+                <div class="flex items-center gap-2 rounded-full border border-stone-200/90 bg-white px-3 py-2 text-xs shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                    <span id="connectionDotM" class="h-2 w-2 rounded-full bg-stone-400"></span>
+                    <span id="connectionTextM">…</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile nav pills -->
+        <nav class="mb-5 flex gap-2 overflow-x-auto pb-1 text-sm font-medium lg:hidden" id="mobileNav">
+            <a href="#/" class="nav-link shrink-0 rounded-full px-4 py-2">Overview</a>
+            <a href="#/floorplan" class="nav-link shrink-0 rounded-full px-4 py-2">Floor plan</a>
+            <a href="#/devices" class="nav-link shrink-0 rounded-full px-4 py-2">Devices</a>
+            <a href="#/terminal" class="nav-link shrink-0 rounded-full px-4 py-2">Terminal</a>
+            <a href="#/activity" class="nav-link shrink-0 rounded-full px-4 py-2">Activity</a>
+            <a href="#/health" class="nav-link shrink-0 rounded-full px-4 py-2">Health</a>
+            <a href="#/security" class="nav-link shrink-0 rounded-full px-4 py-2">Security</a>
+            <a href="#/eco" class="nav-link shrink-0 rounded-full px-4 py-2">Eco</a>
+        </nav>
+
+        <!-- Header -->
+        <header class="mb-8 hidden flex-wrap items-center justify-between gap-4 lg:flex">
+            <div>
+                <h1 id="greeting" class="text-2xl font-bold tracking-tight sm:text-3xl">Good day</h1>
+                <p id="dateLine" class="mt-1 text-sm text-stone-500 dark:text-stone-400"></p>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="themeToggle" class="rounded-full border border-stone-200/90 bg-white p-2.5 shadow-sm hover:bg-stone-50 dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/10">
+                    <i data-lucide="moon" class="hidden h-4 w-4 dark:block"></i>
+                    <i data-lucide="sun" class="block h-4 w-4 dark:hidden"></i>
+                </button>
+                <div class="flex items-center gap-2 rounded-full border border-stone-200/90 bg-white px-4 py-2.5 text-sm shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+                    <span id="connPillDot" class="h-2.5 w-2.5 rounded-full bg-stone-400"></span>
+                    <span id="connPillText" class="text-stone-600 dark:text-stone-300">Connecting…</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ============================== OVERVIEW ============================== -->
+        <div class="view" data-view="overview">
+            <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+
+                <div id="statusCard" class="card relative col-span-1 flex min-h-[360px] flex-col overflow-hidden p-8 transition-colors duration-300 lg:col-span-2">
+                    <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                        <i data-lucide="radar" class="h-4 w-4"></i>
+                        <span class="text-xs font-semibold uppercase tracking-widest">System status</span>
+                    </div>
+
+                    <div class="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+                        <div class="relative h-44 w-full max-w-sm">
+                            <canvas id="presenceCanvas" class="absolute inset-0 h-full w-full"></canvas>
+                        </div>
+                        <div>
+                            <p id="statusLabel" class="text-3xl font-bold tracking-tight">Room Empty</p>
+                            <p id="statusSubtitle" class="mt-1 text-sm text-stone-500 dark:text-stone-400">No presence detected</p>
+                        </div>
+                    </div>
+
+                    <p id="lastUpdated" class="text-xs text-stone-400 dark:text-stone-500">Waiting for data…</p>
+                </div>
+
+                <div class="col-span-1 flex flex-col gap-5">
+                    <div id="securityCard" class="card p-6">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex items-start gap-3">
+                                <div class="rounded-xl bg-red-500/10 p-2.5">
+                                    <i data-lucide="shield" class="h-5 w-5 text-red-500"></i>
+                                </div>
+                                <div>
+                                    <p class="font-semibold leading-tight">Away Mode</p>
+                                    <p id="securityHint" class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">Motion while armed triggers an intrusion alert.</p>
+                                </div>
+                            </div>
+                            <label class="inline-flex shrink-0 cursor-pointer items-center">
+                                <input type="checkbox" id="awayModeToggle" class="peer sr-only">
+                                <div class="relative h-7 w-12 rounded-full bg-stone-300 transition-colors duration-300 after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:duration-300 after:content-[''] peer-checked:bg-red-600 peer-checked:after:translate-x-5 dark:bg-stone-600"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="card p-6">
+                        <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                            <i data-lucide="users" class="h-4 w-4"></i>
+                            <span class="text-xs font-semibold uppercase tracking-widest">Occupancy</span>
+                        </div>
+                        <p class="mt-4 text-4xl font-bold tabular-nums tracking-tight text-cyan-600 dark:text-cyan-400">
+                            ≈<span data-bind="people">5</span><span class="ml-1.5 text-base font-medium opacity-70">people</span>
+                        </p>
+                        <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Estimated headcount · living room sensor</p>
+                    </div>
+
+                    <div class="card flex-1 p-6">
+                        <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                            <i data-lucide="leaf" class="h-4 w-4 text-emerald-600 dark:text-emerald-400"></i>
+                            <span class="text-xs font-semibold uppercase tracking-widest">Energy saved</span>
+                        </div>
+                        <p class="mt-4 text-4xl font-bold tabular-nums tracking-tight text-emerald-600 dark:text-emerald-400">
+                            <span data-bind="energy">0.00</span><span class="ml-1 text-base font-medium opacity-70">kWh</span>
+                        </p>
+                        <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Ticks upward only while rooms sit empty.</p>
+
+                        <div class="mt-4 flex flex-col gap-2 border-t border-stone-200/90 pt-4 dark:border-white/10">
+                            <div class="flex items-center justify-between text-sm">
+                                <span class="flex items-center gap-2 text-stone-500 dark:text-stone-400"><i data-lucide="thermometer" class="h-3.5 w-3.5"></i> HVAC</span>
+                                <span class="power-chip chip" data-bind="hvac-power">—</span>
+                            </div>
+                            <div class="flex items-center justify-between text-sm">
+                                <span class="flex items-center gap-2 text-stone-500 dark:text-stone-400"><i data-lucide="lightbulb" class="h-3.5 w-3.5"></i> Lighting</span>
+                                <span class="power-chip chip" data-bind="lighting-power">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Live CSI waveform -->
+            <section class="mt-8">
+                <div class="card p-6">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                            <i data-lucide="audio-waveform" class="h-4 w-4 text-cyan-600 dark:text-cyan-400"></i>
+                            <span class="text-xs font-semibold uppercase tracking-widest">Live CSI waveform · 64 subcarriers</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span id="vitalsLock" class="chip hidden bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                                <span class="vitals-lock-dot inline-block h-2 w-2 rounded-full bg-blue-500"></span>
+                                Monitoring Vitals — locked on subject
+                            </span>
+                            <span id="csiSignatureChip" class="chip bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">Noise floor</span>
+                        </div>
+                    </div>
+                    <div class="relative mt-4 h-48">
+                        <canvas id="csiChart"></canvas>
+                    </div>
+                    <p class="mt-2 text-xs text-stone-400 dark:text-stone-500">
+                        Raw channel-state amplitudes per packet: flat noise = empty room · erratic spikes = motion · smooth ripple = breathing.
+                    </p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== FLOOR PLAN ============================== -->
+        <div class="view" data-view="floorplan">
+            <div class="mb-4 flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Floor plan</h2>
+                    <p class="text-sm text-stone-500 dark:text-stone-400">Live zone highlighting, inferred from the shared sensor feed.</p>
+                </div>
+                <span class="chip bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">
+                    <i data-lucide="wifi" class="h-3 w-3"></i> 1 ESP32 node
+                </span>
+            </div>
+
+            <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <div class="card p-6 lg:col-span-2">
+                    <svg viewBox="0 0 540 320" class="w-full" aria-label="Home floor plan">
+                        <defs>
+                            <pattern id="floorDots" width="22" height="22" patternUnits="userSpaceOnUse">
+                                <circle cx="1.5" cy="1.5" r="1.5" class="fill-stone-300/50 dark:fill-white/10"></circle>
+                            </pattern>
+                        </defs>
+                        <rect x="8" y="8" width="524" height="304" rx="18" fill="url(#floorDots)"></rect>
+
+                        <rect id="room-living" class="room" x="24" y="24" width="240" height="160" rx="12"></rect>
+                        <text class="room-label" x="44" y="56">Living Room</text>
+                        <text class="room-sub" x="44" y="74">ESP32 · monitored</text>
+
+                        <rect id="room-kitchen" class="room" x="284" y="24" width="232" height="112" rx="12"></rect>
+                        <text class="room-label" x="304" y="56">Kitchen</text>
+                        <text class="room-sub" x="304" y="74">No sensor · not monitored</text>
+
+                        <rect x="284" y="152" width="232" height="32" rx="10" class="fill-stone-400/10 stroke-stone-400/30 dark:stroke-white/15" stroke-width="1.5" stroke-dasharray="4 4"></rect>
+                        <text class="room-sub" x="380" y="172" text-anchor="middle">Hallway</text>
+
+                        <rect id="room-bedroom" class="room" x="24" y="200" width="240" height="96" rx="12"></rect>
+                        <text class="room-label" x="44" y="232">Bedroom</text>
+                        <text class="room-sub" x="44" y="250">No sensor · not monitored</text>
+
+                        <rect x="284" y="200" width="232" height="96" rx="12" class="room opacity-45"></rect>
+                        <text class="room-sub" x="304" y="252">Utility — no sensor</text>
+
+                        <g transform="translate(150,148)">
+                            <circle r="7" class="sensor-pulse" fill="rgba(16,185,129,0.35)"></circle>
+                            <circle r="7" class="fill-emerald-500 stroke-white dark:stroke-[#0B0E0C]" stroke-width="2"></circle>
+                        </g>
+                        <text x="150" y="174" text-anchor="middle" class="room-sub">sensor node</text>
+                    </svg>
+                </div>
+
+                <div class="flex flex-col gap-4">
+                    <div class="card zone-card flex flex-1 items-center gap-4 p-5">
+                        <div class="rounded-xl bg-stone-900/5 p-3 dark:bg-white/10"><i data-lucide="sofa" class="h-5 w-5"></i></div>
+                        <div>
+                            <p class="font-semibold">Living Room</p>
+                            <p id="zoneLivingState" class="zone-state chip mt-1 bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">Empty</p>
+                        </div>
+                    </div>
+                    <div class="card zone-card flex flex-1 items-center gap-4 p-5 opacity-60">
+                        <div class="rounded-xl bg-stone-900/5 p-3 dark:bg-white/10"><i data-lucide="bed-double" class="h-5 w-5"></i></div>
+                        <div>
+                            <p class="font-semibold">Bedroom</p>
+                            <p class="chip mt-1 bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">No sensor</p>
+                        </div>
+                    </div>
+                    <div class="card zone-card flex flex-1 items-center gap-4 p-5 opacity-60">
+                        <div class="rounded-xl bg-stone-900/5 p-3 dark:bg-white/10"><i data-lucide="cooking-pot" class="h-5 w-5"></i></div>
+                        <div>
+                            <p class="font-semibold">Kitchen</p>
+                            <p class="chip mt-1 bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">No sensor</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="mt-8">
+                <div class="card p-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                            <i data-lucide="chart-gantt" class="h-4 w-4"></i>
+                            <span class="text-xs font-semibold uppercase tracking-widest">Occupancy timeline</span>
+                        </div>
+                        <div class="flex items-center gap-3 text-[11px] text-stone-400 dark:text-stone-500">
+                            <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-stone-400"></span>Empty</span>
+                            <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-amber-500"></span>Moving</span>
+                            <span class="flex items-center gap-1"><span class="h-2 w-2 rounded-full bg-blue-500"></span>Sleeping</span>
+                        </div>
+                    </div>
+                    <div class="relative mt-4 h-20">
+                        <canvas id="historyCanvas" class="absolute inset-0 h-full w-full"></canvas>
+                        <p id="historyEmpty" class="absolute inset-0 flex items-center justify-center text-xs text-stone-400 dark:text-stone-500">Collecting history… segments appear as states change.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== DEVICES ============================== -->
+        <div class="view" data-view="devices">
+            <div class="mb-4">
+                <h2 class="text-xl font-bold tracking-tight">Devices</h2>
+                <p class="text-sm text-stone-500 dark:text-stone-400">Control your ecosystem manually, or let automation follow presence.</p>
+            </div>
+
+            <section class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <div class="card p-6 lg:col-span-2">
+                    <div class="mb-2 flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                        <i data-lucide="plug-zap" class="h-4 w-4"></i>
+                        <span class="text-xs font-semibold uppercase tracking-widest">Controls</span>
+                    </div>
+
+                    <div class="flex flex-col gap-4 border-b border-stone-200/90 py-5 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="rounded-xl bg-orange-500/10 p-3"><i data-lucide="thermometer" class="h-5 w-5 text-orange-500"></i></div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <p class="font-semibold">HVAC</p>
+                                    <span id="hvacModeChip" class="chip cursor-pointer bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" title="Click to restore Auto">Auto</span>
+                                </div>
+                                <p id="hvacSub" class="text-xs text-stone-500 dark:text-stone-400">Following sensors</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-5">
+                            <div class="flex items-center gap-2">
+                                <button data-delta="-1" class="temp-step h-8 w-8 rounded-full border border-stone-200/90 text-lg leading-none text-stone-600 transition-transform active:scale-90 hover:bg-stone-100 disabled:opacity-30 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/10">−</button>
+                                <span id="hvacTemp" class="w-14 text-center text-xl font-bold tabular-nums">22°</span>
+                                <button data-delta="1" class="temp-step h-8 w-8 rounded-full border border-stone-200/90 text-lg leading-none text-stone-600 transition-transform active:scale-90 hover:bg-stone-100 disabled:opacity-30 dark:border-white/10 dark:text-stone-300 dark:hover:bg-white/10">+</button>
+                            </div>
+                            <label class="inline-flex cursor-pointer items-center">
+                                <input type="checkbox" id="hvacToggle" class="peer sr-only">
+                                <div class="relative h-7 w-12 rounded-full bg-stone-300 transition-colors duration-300 after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:duration-300 after:content-[''] peer-checked:bg-emerald-600 peer-checked:after:translate-x-5 dark:bg-stone-600 dark:peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="rounded-xl bg-yellow-500/10 p-3"><i data-lucide="lightbulb" class="h-5 w-5 text-yellow-500"></i></div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <p class="font-semibold">Lighting</p>
+                                    <span id="lightingModeChip" class="chip cursor-pointer bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300" title="Click to restore Auto">Auto</span>
+                                </div>
+                                <p id="lightingSub" class="text-xs text-stone-500 dark:text-stone-400">Following sensors</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-1 items-center gap-4 sm:max-w-xs">
+                            <input type="range" id="lightingSlider" min="5" max="100" value="80" class="w-full">
+                            <span id="lightingValue" class="w-10 text-right text-sm font-semibold tabular-nums">80%</span>
+                            <label class="inline-flex cursor-pointer items-center">
+                                <input type="checkbox" id="lightingToggle" class="peer sr-only">
+                                <div class="relative h-7 w-12 rounded-full bg-stone-300 transition-colors duration-300 after:absolute after:top-1 after:left-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all after:duration-300 after:content-[''] peer-checked:bg-emerald-600 peer-checked:after:translate-x-5 dark:bg-stone-600 dark:peer-checked:bg-emerald-500"></div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <p class="text-xs text-stone-400 dark:text-stone-500">Manual changes switch a device to Manual — it stops following automation until you restore Auto.</p>
+                </div>
+
+                <div class="card p-6">
+                    <div class="mb-4 flex items-center gap-2 text-stone-500 dark:text-stone-400">
+                        <i data-lucide="workflow" class="h-4 w-4"></i>
+                        <span class="text-xs font-semibold uppercase tracking-widest">Automation rules</span>
+                    </div>
+                    <ul class="flex flex-col gap-4 text-sm">
+                        <li class="flex items-start gap-3">
+                            <span class="chip shrink-0 bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">Empty</span>
+                            <span class="text-stone-600 dark:text-stone-400">HVAC & lights power down — energy accrues</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <span class="chip shrink-0 bg-amber-500/15 text-amber-600 dark:text-amber-400">Moving</span>
+                            <span class="text-stone-600 dark:text-stone-400">HVAC to 22°C, lights to 80%</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <span class="chip shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">Sleeping</span>
+                            <span class="text-stone-600 dark:text-stone-400">Low-power HVAC at 20°C, lights off</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <span class="chip shrink-0 bg-red-500/15 text-red-600 dark:text-red-400">Away + motion</span>
+                            <span class="text-stone-600 dark:text-stone-400">Intrusion alert fires immediately</span>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== TERMINAL ============================== -->
+        <div class="view" data-view="terminal">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Live system log</h2>
+                    <p class="text-sm text-stone-500 dark:text-stone-400">Raw backend pipeline output, straight off the WebSocket.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="chip bg-stone-900/5 font-mono text-stone-500 dark:bg-white/10 dark:text-stone-400">RX <span id="termPktCount">0</span> pkts</span>
+                    <span class="chip bg-stone-900/5 font-mono text-stone-500 dark:bg-white/10 dark:text-stone-400">1 Hz stream</span>
+                </div>
+            </div>
+
+            <section class="overflow-hidden rounded-3xl border border-stone-800 bg-[#0A0F0C] shadow-lg">
+                <div class="flex items-center gap-2 border-b border-white/10 bg-white/[0.03] px-4 py-2.5">
+                    <span class="h-2.5 w-2.5 rounded-full bg-red-500/80"></span>
+                    <span class="h-2.5 w-2.5 rounded-full bg-yellow-500/80"></span>
+                    <span class="h-2.5 w-2.5 rounded-full bg-green-500/80"></span>
+                    <p class="ml-2 font-mono text-xs text-stone-400">wifisense@pipeline: ~/csi-stream</p>
+                </div>
+                <div id="terminalBody" class="h-[440px] overflow-y-auto p-4 font-mono text-[11px] leading-relaxed sm:text-xs">
+                    <p class="term-line text-stone-500">[boot] attaching to socket.io csi-stream…</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== ACTIVITY ============================== -->
+        <div class="view" data-view="activity">
+            <div class="mb-4">
+                <h2 class="text-xl font-bold tracking-tight">Activity</h2>
+                <p class="text-sm text-stone-500 dark:text-stone-400">Everything the ecosystem has seen and done recently.</p>
+            </div>
+
+            <section class="mb-5 grid grid-cols-3 gap-5">
+                <div class="card p-5">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-cyan-600 dark:text-cyan-400">Sensor events</p>
+                    <p id="statSensor" class="mt-2 text-2xl font-bold tabular-nums">0</p>
+                </div>
+                <div class="card p-5">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400">Device changes</p>
+                    <p id="statDevice" class="mt-2 text-2xl font-bold tabular-nums">0</p>
+                </div>
+                <div class="card p-5">
+                    <p class="text-xs font-semibold uppercase tracking-widest text-red-500">System</p>
+                    <p id="statSystem" class="mt-2 text-2xl font-bold tabular-nums">0</p>
+                </div>
+            </section>
+
+            <section class="card p-6">
+                <ul id="activityList" class="-mr-2 flex max-h-[520px] flex-col gap-1 overflow-y-auto pr-2 text-sm">
+                    <li class="py-2 text-xs text-stone-400 dark:text-stone-500">No activity yet…</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- ============================== HEALTH ============================== -->
+        <div class="view" data-view="health">
+            <div class="mb-6 flex items-start gap-4">
+                <div class="rounded-2xl bg-blue-500/10 p-3.5"><i data-lucide="heart-pulse" class="h-6 w-6 text-blue-500"></i></div>
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Health — contactless vitals monitoring</h2>
+                    <p class="text-sm text-stone-500 dark:text-stone-400">How Wi-Fi signal ripple becomes a breathing readout while you sleep.</p>
+                </div>
+            </div>
+
+            <section class="card p-6">
+                <p class="mb-4 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Classification pipeline</p>
+                <svg viewBox="0 0 760 110" class="w-full min-w-[560px]" aria-label="Health classification pipeline">
+                    <defs>
+                        <marker id="arrowH" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b8b2aa"></path>
+                        </marker>
+                    </defs>
+                    <rect class="fbox" x="4" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="70" y="50" text-anchor="middle">ESP32 CSI</text>
+                    <text class="fsub" x="70" y="68" text-anchor="middle">64 subcarriers · 1 Hz</text>
+
+                    <line class="farrow" x1="140" y1="55" x2="154" y2="55"></line>
+
+                    <rect class="fbox" x="158" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="224" y="50" text-anchor="middle">Denoise</text>
+                    <text class="fsub" x="224" y="68" text-anchor="middle">Hampel + DC removal</text>
+
+                    <line class="farrow" x1="294" y1="55" x2="308" y2="55"></line>
+
+                    <rect class="fbox" x="312" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="378" y="50" text-anchor="middle">Band-power FFT</text>
+                    <text class="fsub" x="378" y="68" text-anchor="middle">0.1–0.5 Hz breathing band</text>
+
+                    <line class="farrow" x1="448" y1="55" x2="462" y2="55"></line>
+
+                    <rect class="fbox" x="466" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="532" y="50" text-anchor="middle">Ripple test</text>
+                    <text class="fsub" x="532" y="68" text-anchor="middle">quiet AND periodic?</text>
+
+                    <line class="farrow" x1="602" y1="55" x2="616" y2="55"></line>
+
+                    <rect class="fbox" x="620" y="23" width="136" height="64" rx="12" style="fill: rgba(59,130,246,0.10); stroke: rgba(59,130,246,0.60);"></rect>
+                    <text class="ftext" x="688" y="50" text-anchor="middle">STATE 2 · SLEEPING</text>
+                    <text class="fsub" x="688" y="68" text-anchor="middle">vitals lock-on engaged</text>
+                </svg>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">What happens physically</p>
+                    <p class="text-sm leading-relaxed text-stone-600 dark:text-stone-300">
+                        A sleeping person's chest rises and falls roughly every 2–6 seconds. Those few millimetres of movement
+                        subtly shift the multipath reflections of the Wi-Fi signal, which shows up as a slow periodic ripple
+                        across the CSI amplitudes. The model isolates that ripple with a band-pass filter over
+                        <span class="font-semibold text-blue-600 dark:text-blue-400">0.1–0.5 Hz</span> (6–30 breaths/min) and
+                        confirms it only when overall motion variance is near zero — still body, live lungs.
+                    </p>
+                    <div class="mt-4 flex flex-wrap gap-2">
+                        <span data-bind="vitals-lock-chip" class="chip hidden bg-blue-500/15 text-blue-600 dark:text-blue-400">Monitoring Vitals</span>
+                        <span data-bind="state-chip" class="chip bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">Empty</span>
+                        <a href="#/" class="chip bg-stone-900/5 text-stone-600 hover:bg-stone-900/10 dark:bg-white/10 dark:text-stone-300">See waveform →</a>
+                    </div>
+                </div>
+
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Decision logic (Python)</p>
+                    <pre class="code-block font-mono text-[11px] leading-relaxed"><span class="c"># per ~30 s window of subcarrier amplitudes</span>
+window = csi_series[-<span class="k">30</span>:] - mean(csi_series[-<span class="k">30</span>:])
+ripple = band_power(window, f_lo=<span class="k">0.1</span>, f_hi=<span class="k">0.5</span>)
+var    = variance(window)
+
+<span class="k">if</span> var &lt; VAR_QUIET <span class="k">and</span> ripple &gt; RIPPLE_MIN:
+    classify(STATE_SLEEPING)
+    lock_vitals()   <span class="c"># → blue "Monitoring Vitals" badge</span></pre>
+                </div>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
+                <div class="card p-5">
+                    <i data-lucide="waves" class="h-4 w-4 text-blue-500"></i>
+                    <p class="mt-2 text-sm font-semibold">Breathing-band power</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Spectral energy inside 0.1–0.5 Hz must dominate the residual noise.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="activity" class="h-4 w-4 text-blue-500"></i>
+                    <p class="mt-2 text-sm font-semibold">Autocorrelation peak</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">A repeating period in the ripple confirms respiration over random drift.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="minimize-2" class="h-4 w-4 text-blue-500"></i>
+                    <p class="mt-2 text-sm font-semibold">Quiet-baseline variance</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Near-zero motion variance proves the subject is stationary, not walking.</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== SECURITY ============================== -->
+        <div class="view" data-view="security">
+            <div class="mb-6 flex items-start gap-4">
+                <div class="rounded-2xl bg-red-500/10 p-3.5"><i data-lucide="shield" class="h-6 w-6 text-red-500"></i></div>
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Security — motion detection &amp; intruder alerts</h2>
+                    <p class="text-sm text-stone-500 dark:text-stone-400">How amplitude spikes become an instant intrusion alarm.</p>
+                </div>
+            </div>
+
+            <section class="card p-6">
+                <p class="mb-4 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Classification pipeline</p>
+                <svg viewBox="0 0 760 110" class="w-full min-w-[560px]" aria-label="Security classification pipeline">
+                    <defs>
+                        <marker id="arrowS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b8b2aa"></path>
+                        </marker>
+                    </defs>
+                    <rect class="fbox" x="4" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="70" y="50" text-anchor="middle">ESP32 CSI</text>
+                    <text class="fsub" x="70" y="68" text-anchor="middle">rolling 5 s window</text>
+
+                    <line class="farrow" x1="140" y1="55" x2="154" y2="55"></line>
+
+                    <rect class="fbox" x="158" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="224" y="50" text-anchor="middle">Variance σ² + spikes</text>
+                    <text class="fsub" x="224" y="68" text-anchor="middle">per-subcarrier energy</text>
+
+                    <line class="farrow" x1="294" y1="55" x2="308" y2="55"></line>
+
+                    <rect class="fbox" x="312" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="378" y="50" text-anchor="middle">Motion test</text>
+                    <text class="fsub" x="378" y="68" text-anchor="middle">σ² &gt; σ_max ?</text>
+
+                    <line class="farrow" x1="448" y1="55" x2="462" y2="55"></line>
+
+                    <rect class="fbox" x="466" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="532" y="50" text-anchor="middle">Away gate</text>
+                    <text class="fsub" x="532" y="68" text-anchor="middle">armed ?</text>
+
+                    <line class="farrow" x1="602" y1="55" x2="616" y2="55"></line>
+
+                    <rect class="fbox" x="620" y="23" width="136" height="64" rx="12" style="fill: rgba(239,68,68,0.10); stroke: rgba(239,68,68,0.60);"></rect>
+                    <text class="ftext" x="688" y="50" text-anchor="middle">INTRUDER ALERT</text>
+                    <text class="fsub" x="688" y="68" text-anchor="middle">toast + red flash</text>
+                </svg>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">What happens physically</p>
+                    <p class="text-sm leading-relaxed text-stone-600 dark:text-stone-300">
+                        A person moving through the room crosses many multipath paths at once. Each crossing detunes dozens of
+                        subcarriers simultaneously, so the amplitude series erupts with wide, erratic spikes — very unlike the
+                        gentle periodic ripple of breathing or the flat line of an empty room. The model watches a short rolling
+                        window; when aggregate energy bursts past the motion threshold it flips to
+                        <span class="font-semibold text-amber-600 dark:text-amber-400">STATE 1 · MOVING</span>. If Away Mode is
+                        armed at that instant, the alert path fires: a red toast, a flashing border on the status card, and an
+                        event in the log.
+                    </p>
+                    <div class="mt-4 flex flex-wrap items-center gap-2">
+                        <span data-bind="sec-arm" class="chip bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400">Away Mode: disarmed</span>
+                        <span data-bind="last-alert" class="chip hidden bg-red-500/15 text-red-600 dark:text-red-400">Last alert just now</span>
+                        <a href="#/" class="chip bg-stone-900/5 text-stone-600 hover:bg-stone-900/10 dark:bg-white/10 dark:text-stone-300">Arm on dashboard →</a>
+                    </div>
+                </div>
+
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Decision logic (Python)</p>
+                    <pre class="code-block font-mono text-[11px] leading-relaxed">sigma2 = variance(csi_window)          <span class="c"># total disturbance energy</span>
+spikes = count(abs(amp) &gt; <span class="k">3</span> * mad)     <span class="c"># outlier subcarriers</span>
+
+<span class="k">if</span> sigma2 &gt; SIGMA_MAX <span class="k">or</span> spikes &gt; N_SPIKES:
+    classify(STATE_MOVING)
+    <span class="k">if</span> away_armed:
+        raise_intruder()   <span class="c"># socket event → toast + red flash</span></pre>
+                </div>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
+                <div class="card p-5">
+                    <i data-lucide="gauge" class="h-4 w-4 text-red-500"></i>
+                    <p class="mt-2 text-sm font-semibold">Amplitude variance σ²</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Aggregate burst energy across all 64 subcarriers.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="zap" class="h-4 w-4 text-red-500"></i>
+                    <p class="mt-2 text-sm font-semibold">Spike rate vs MAD</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Count of subcarriers exceeding three median absolute deviations.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="signal" class="h-4 w-4 text-red-500"></i>
+                    <p class="mt-2 text-sm font-semibold">RSSI drop-throughs</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Sudden link-quality dips as a body absorbs the direct path.</p>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================== ECO ============================== -->
+        <div class="view" data-view="eco">
+            <div class="mb-6 flex items-start gap-4">
+                <div class="rounded-2xl bg-emerald-500/10 p-3.5"><i data-lucide="leaf" class="h-6 w-6 text-emerald-600 dark:text-emerald-400"></i></div>
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight">Eco — occupancy-driven energy savings</h2>
+                    <p class="text-sm text-stone-500 dark:text-stone-400">How the classifier's output becomes lower bills and idle kWh banked.</p>
+                </div>
+            </div>
+
+            <section class="card p-6">
+                <p class="mb-4 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Actuation pipeline</p>
+                <svg viewBox="0 0 760 110" class="w-full min-w-[560px]" aria-label="Energy automation pipeline">
+                    <defs>
+                        <marker id="arrowE" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#b8b2aa"></path>
+                        </marker>
+                    </defs>
+                    <rect class="fbox" x="4" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="70" y="50" text-anchor="middle">State stream</text>
+                    <text class="fsub" x="70" y="68" text-anchor="middle">{0, 1, 2} labels</text>
+
+                    <line class="farrow" x1="140" y1="55" x2="154" y2="55"></line>
+
+                    <rect class="fbox" x="158" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="224" y="50" text-anchor="middle">Policy table</text>
+                    <text class="fsub" x="224" y="68" text-anchor="middle">device targets / state</text>
+
+                    <line class="farrow" x1="294" y1="55" x2="308" y2="55"></line>
+
+                    <rect class="fbox" x="312" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="378" y="50" text-anchor="middle">Actuation</text>
+                    <text class="fsub" x="378" y="68" text-anchor="middle">HVAC · Lighting relays</text>
+
+                    <line class="farrow" x1="448" y1="55" x2="462" y2="55"></line>
+
+                    <rect class="fbox" x="466" y="23" width="132" height="64" rx="12"></rect>
+                    <text class="ftext" x="532" y="50" text-anchor="middle">Metering</text>
+                    <text class="fsub" x="532" y="68" text-anchor="middle">Δt counted only when empty</text>
+
+                    <line class="farrow" x1="602" y1="55" x2="616" y2="55"></line>
+
+                    <rect class="fbox" x="620" y="23" width="136" height="64" rx="12" style="fill: rgba(16,185,129,0.10); stroke: rgba(16,185,129,0.60);"></rect>
+                    <text class="ftext" x="688" y="50" text-anchor="middle">kWh SAVED</text>
+                    <text class="fsub" x="688" y="68" text-anchor="middle">live counter</text>
+                </svg>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Why it saves energy</p>
+                    <p class="text-sm leading-relaxed text-stone-600 dark:text-stone-300">
+                        HVAC and lighting are usually run on fixed schedules that ignore reality — cooling an empty house,
+                        lighting an empty kitchen. WifiSense replaces the schedule with presence: the moment the classifier
+                        reports <span class="font-semibold">Empty</span>, automation powers devices down and the meter starts
+                        banking the avoided draw. Sleep mode drops HVAC to an efficient low setpoint instead of full comfort.
+                        Manual overrides always win until you restore Auto.
+                    </p>
+                    <div class="mt-4 flex flex-wrap items-center gap-2">
+                        <span class="chip bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300"><span data-bind="energy">0.00</span>&nbsp;kWh saved</span>
+                        <span class="chip power-chip" data-bind="hvac-power">—</span>
+                        <span class="chip power-chip" data-bind="lighting-power">—</span>
+                        <a href="#/devices" class="chip bg-stone-900/5 text-stone-600 hover:bg-stone-900/10 dark:bg-white/10 dark:text-stone-300">Open devices →</a>
+                    </div>
+                </div>
+
+                <div class="card p-6">
+                    <p class="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-500 dark:text-stone-400">Automation policy (Python)</p>
+                    <pre class="code-block font-mono text-[11px] leading-relaxed"><span class="k">if</span> state == EMPTY:
+    hvac.off(); lights.off()
+    meter += dt * IDLE_KW      <span class="c"># counter ticks here only</span>
+<span class="k">elif</span> state == SLEEPING:
+    hvac.set(temp=<span class="k">20</span>); lights.off()   <span class="c"># low-power mode</span>
+<span class="k">else</span>:  <span class="c"># MOVING</span>
+    hvac.set(temp=<span class="k">22</span>); lights.set(brightness=<span class="k">80</span>)</pre>
+                </div>
+            </section>
+
+            <section class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
+                <div class="card p-5">
+                    <i data-lucide="timer-off" class="h-4 w-4 text-emerald-600 dark:text-emerald-400"></i>
+                    <p class="mt-2 text-sm font-semibold">Empty-dwell time</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Every second classified Empty converts directly into avoided load.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="trending-down" class="h-4 w-4 text-emerald-600 dark:text-emerald-400"></i>
+                    <p class="mt-2 text-sm font-semibold">Duty-cycle reduction</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Compressor and lamp hours shrink versus a fixed schedule baseline.</p>
+                </div>
+                <div class="card p-5">
+                    <i data-lucide="battery-charging" class="h-4 w-4 text-emerald-600 dark:text-emerald-400"></i>
+                    <p class="mt-2 text-sm font-semibold">Sleep-mode efficiency</p>
+                    <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">Night setback keeps comfort where it matters and cuts elsewhere.</p>
+                </div>
+            </section>
+        </div>
+
+    </main>
+</div>
+
+<!-- Toast stack -->
+<div id="toastStack" class="fixed bottom-6 right-6 z-50 flex w-80 flex-col gap-2"></div>
+
+<script>
+    lucide.createIcons();
+
+    // ---- Theme (auto-detect OS preference until user overrides) ----
+    const root = document.documentElement;
+    if (!localStorage.getItem('wifi-theme') && matchMedia('(prefers-color-scheme: dark)').matches) {
+        root.classList.add('dark');
+    } else if (localStorage.getItem('wifi-theme') === 'dark') {
+        root.classList.add('dark');
+    }
+    function toggleTheme() {
+        root.classList.toggle('dark');
+        localStorage.setItem('wifi-theme', root.classList.contains('dark') ? 'dark' : 'light');
+        drawHistory();
+    }
+    document.getElementById('themeToggle').addEventListener('click', toggleTheme);
+    document.getElementById('themeToggleMobile').addEventListener('click', toggleTheme);
+
+    // ---- Greeting + date ----
+    const hour = new Date().getHours();
+    document.getElementById('greeting').textContent =
+        hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    document.getElementById('dateLine').textContent =
+        new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
+    // ---- Router ----
+    const ROUTES = ['overview', 'floorplan', 'devices', 'terminal', 'activity', 'health', 'security', 'eco'];
+    const NAV_ACTIVE = 'nav-link flex items-center gap-3 rounded-xl bg-emerald-600/10 px-3 py-2.5 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300';
+    const NAV_IDLE = 'nav-link flex items-center gap-3 rounded-xl px-3 py-2.5 text-stone-600 hover:bg-stone-900/5 dark:text-stone-400 dark:hover:bg-white/5';
+    const PILL_ACTIVE = 'nav-link shrink-0 rounded-full bg-emerald-600 px-4 py-2 text-white';
+    const PILL_IDLE = 'nav-link shrink-0 rounded-full px-4 py-2 text-stone-600 hover:bg-stone-900/5 dark:text-stone-400 dark:hover:bg-white/5';
+
+    function currentRoute() {
+        const h = location.hash.replace(/^#\//, '');
+        return ROUTES.includes(h) ? h : 'overview';
+    }
+
+    function renderRoute() {
+        const route = currentRoute();
+        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === route));
+        document.querySelectorAll('.nav-link').forEach(a => {
+            const target = a.getAttribute('href').replace('#/', '') || 'overview';
+            const desktop = a.closest('aside');
+            a.className = desktop
+                ? (target === route ? NAV_ACTIVE : NAV_IDLE)
+                : (target === route ? PILL_ACTIVE : PILL_IDLE);
+        });
+        window.scrollTo({ top: 0 });
+
+        requestAnimationFrame(() => {
+            if (route === 'floorplan') drawHistory();
+            if (route === 'overview') { resizePresence(); csiChart.resize(); }
+        });
+    }
+    window.addEventListener('hashchange', renderRoute);
+
+    // ---- Data binding helper (multiple views share values) ----
+    function bindAll(name, fn) {
+        document.querySelectorAll(`[data-bind="${name}"]`).forEach(fn);
+    }
+
+    // ---- Element references ----
+    const connPillDot = document.getElementById('connPillDot');
+    const connPillText = document.getElementById('connPillText');
+    const sideDot = document.getElementById('sideDot');
+    const sideConnText = document.getElementById('sideConnText');
+    const statusCard = document.getElementById('statusCard');
+    const statusLabel = document.getElementById('statusLabel');
+    const statusSubtitle = document.getElementById('statusSubtitle');
+    const lastUpdated = document.getElementById('lastUpdated');
+    const awayModeToggle = document.getElementById('awayModeToggle');
+    const securityHint = document.getElementById('securityHint');
+    const hvacToggle = document.getElementById('hvacToggle');
+    const hvacTemp = document.getElementById('hvacTemp');
+    const hvacModeChip = document.getElementById('hvacModeChip');
+    const hvacSub = document.getElementById('hvacSub');
+    const lightingToggle = document.getElementById('lightingToggle');
+    const lightingSlider = document.getElementById('lightingSlider');
+    const lightingValue = document.getElementById('lightingValue');
+    const lightingModeChip = document.getElementById('lightingModeChip');
+    const lightingSub = document.getElementById('lightingSub');
+    const activityList = document.getElementById('activityList');
+    const vitalsLock = document.getElementById('vitalsLock');
+    const csiSignatureChip = document.getElementById('csiSignatureChip');
+    const terminalBody = document.getElementById('terminalBody');
+    const termPktCount = document.getElementById('termPktCount');
+
+    let currentState = 0;
+    let awayArmed = false;
+    let bootstrapped = false;
+
+    function setAwayUI(enabled) {
+        awayArmed = enabled;
+        awayModeToggle.checked = enabled;
+        securityHint.textContent = enabled
+            ? 'Armed — motion now triggers the intrusion alert.'
+            : 'Disarmed — motion alerts are suppressed.';
+        bindAll('sec-arm', el => {
+            el.textContent = 'Away Mode: ' + (enabled ? 'armed' : 'disarmed');
+            el.className = 'chip ' + (enabled
+                ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                : 'bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400');
+        });
+        renderStatus(currentState);
+    }
+
+    function setText(el, txt) {
+        if (el.textContent !== txt) {
+            el.textContent = txt;
+            el.classList.remove('swap');
+            void el.offsetWidth;
+            el.classList.add('swap');
+        }
+    }
+
+    function tweenNumber(el, target, decimals = 2) {
+        const start = parseFloat(el.textContent.replace(/[^\d.-]/g, '')) || 0;
+        if (Math.abs(target - start) < 0.0001) { el.textContent = target.toFixed(decimals); return; }
+        const t0 = performance.now(), dur = 700;
+        (function step(t) {
+            const k = Math.min(1, (t - t0) / dur);
+            el.textContent = (start + (target - start) * (1 - Math.pow(1 - k, 3))).toFixed(decimals);
+            if (k < 1) requestAnimationFrame(step);
+        })(t0);
+    }
+
+    function setEnergy(value) {
+        bindAll('energy', el => tweenNumber(el, value));
+    }
+
+    // ---- Toasts ----
+    function toast(message, kind = 'info') {
+        const styles = {
+            info: ['wifi', 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'],
+            sensor: ['radar', 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'],
+            device: ['plug-zap', 'bg-violet-500/10 text-violet-600 dark:text-violet-400'],
+            system: ['shield', 'bg-red-500/10 text-red-500'],
+            alert: ['triangle-alert', 'bg-red-500/15 text-red-600 dark:text-red-400'],
+        };
+        const [icon, color] = styles[kind] || styles.info;
+
+        const el = document.createElement('div');
+        el.className = 'toast-enter card flex items-start gap-3 p-4 shadow-lg';
+        el.innerHTML = `<span class="mt-0.5 rounded-lg ${color} p-1.5"><i data-lucide="${icon}" class="h-4 w-4"></i></span>
+            <p class="flex-1 text-sm leading-snug">${message}</p>`;
+        toastStack.appendChild(el);
+        lucide.createIcons();
+        setTimeout(() => {
+            el.classList.remove('toast-enter');
+            el.classList.add('toast-exit');
+            el.addEventListener('animationend', () => el.remove(), { once: true });
+        }, 4200);
+        while (toastStack.children.length > 4) toastStack.firstChild.remove();
+    }
+
+    // ---- Particle presence field ----
+    const presenceCanvas = document.getElementById('presenceCanvas');
+    const pctx = presenceCanvas.getContext('2d');
+    const PARTICLE_COUNT = 38;
+    const particles = Array.from({ length: PARTICLE_COUNT }, () => ({
+        angle: Math.random() * Math.PI * 2,
+        radius: 0.2 + Math.random() * 0.75,
+        speed: 0.3 + Math.random() * 0.9,
+        size: 2.5 + Math.random() * 6,
+        phase: Math.random() * Math.PI * 2,
+    }));
+
+    const FIELD_MODES = {
+        empty:    { color: [120, 113, 108], alpha: 0.30, orbit: 0.12, jitter: 0.4, breathAmp: 0.02, breathFreq: 0.8, glow: false },
+        moving:   { color: [245, 158, 11], alpha: 0.55, orbit: 0.9, jitter: 3.5, breathAmp: 0.06, breathFreq: 2.2, glow: true },
+        sleeping: { color: [59, 130, 246], alpha: 0.45, orbit: 0.05, jitter: 0.3, breathAmp: 0.16, breathFreq: 0.45, glow: true },
+        alert:    { color: [239, 68, 68], alpha: 0.65, orbit: 1.6, jitter: 7, breathAmp: 0.08, breathFreq: 3.5, glow: true },
+    };
+    let fieldMode = Object.assign({}, FIELD_MODES.empty);
+
+    function resizePresence() {
+        const dpr = window.devicePixelRatio || 1;
+        presenceCanvas.width = presenceCanvas.clientWidth * dpr;
+        presenceCanvas.height = presenceCanvas.clientHeight * dpr;
+        pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resizePresence();
+    window.addEventListener('resize', resizePresence);
+
+    function setFieldMode(name) { fieldMode.targetName = name; }
+    setFieldMode('empty');
+
+    function lerp(a, b, k) { return a + (b - a) * k; }
+
+    function drawPresence(t) {
+        const target = FIELD_MODES[fieldMode.targetName || 'empty'];
+        for (const key of ['alpha', 'orbit', 'jitter', 'breathAmp', 'breathFreq']) {
+            fieldMode[key] = lerp(fieldMode[key], target[key], 0.03);
+        }
+        fieldMode.color = target.color;
+        fieldMode.glow = target.glow;
+
+        const W = presenceCanvas.clientWidth, H = presenceCanvas.clientHeight;
+        if (W && H) {
+            pctx.clearRect(0, 0, W, H);
+            const cx = W / 2, cy = H / 2;
+            const baseR = Math.min(W, H) * 0.42;
+            const [r, g, b] = fieldMode.color;
+
+            for (const p of particles) {
+                p.angle += p.speed * fieldMode.orbit * 0.01;
+                const breath = 1 + fieldMode.breathAmp * Math.sin(t * 0.001 * fieldMode.breathFreq + p.phase);
+                const rr = p.radius * baseR * breath;
+                const jx = (Math.random() - 0.5) * fieldMode.jitter;
+                const jy = (Math.random() - 0.5) * fieldMode.jitter;
+                const x = cx + Math.cos(p.angle) * rr + jx;
+                const y = cy + Math.sin(p.angle) * rr * 0.62 + jy;
+
+                pctx.beginPath();
+                pctx.arc(x, y, p.size, 0, Math.PI * 2);
+                pctx.fillStyle = `rgba(${r},${g},${b},${fieldMode.alpha})`;
+                if (fieldMode.glow) { pctx.shadowColor = `rgba(${r},${g},${b},0.8)`; pctx.shadowBlur = 12; }
+                else { pctx.shadowBlur = 0; }
+                pctx.fill();
+            }
+        }
+        requestAnimationFrame(drawPresence);
+    }
+    requestAnimationFrame(drawPresence);
+
+    // ---- Presence rendering ----
+    const STATE_STYLES = {
+        0: { chip: 'bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400', label: 'Empty' },
+        1: { chip: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', label: 'Moving' },
+        2: { chip: 'bg-blue-500/15 text-blue-600 dark:text-blue-400', label: 'Sleeping' },
+    };
+    const ROOM_ACTIVE_CLASS = { 1: 'active-moving', 2: 'active-sleeping' };
+
+    function renderStatus(state) {
+        const intruder = state === 1 && awayArmed;
+        setFieldMode(intruder ? 'alert' : state === 1 ? 'moving' : state === 2 ? 'sleeping' : 'empty');
+
+        statusCard.classList.remove('intruder-alert');
+
+        if (intruder) {
+            statusCard.classList.add('intruder-alert');
+            setText(statusLabel, 'Intruder Detected');
+            setText(statusSubtitle, 'Motion detected while Away Mode is active');
+        } else if (state === 1) {
+            setText(statusLabel, 'Motion Detected');
+            setText(statusSubtitle, 'Away Mode is off — alert suppressed');
+        } else if (state === 2) {
+            setText(statusLabel, 'Occupant Sleeping');
+            setText(statusSubtitle, 'Steady presence, low motion');
+        } else {
+            setText(statusLabel, 'Room Empty');
+            setText(statusSubtitle, 'No presence detected');
+        }
+
+        vitalsLock.classList.toggle('hidden', state !== 2);
+        bindAll('vitals-lock-chip', el => el.classList.toggle('hidden', state !== 2));
+        bindAll('state-chip', el => {
+            el.className = 'chip ' + STATE_STYLES[state].chip;
+            el.textContent = STATE_STYLES[state].label;
+        });
+
+        const zoneLiving = document.getElementById('zoneLivingState');
+        zoneLiving.className = 'zone-state chip mt-1 ' + STATE_STYLES[state].chip;
+        zoneLiving.textContent = intruder ? 'Intruder' : STATE_STYLES[state].label;
+
+        const activeClass = ROOM_ACTIVE_CLASS[state];
+        const livingRoom = document.getElementById('room-living');
+        livingRoom.classList.remove('active-moving', 'active-sleeping');
+        if (activeClass && !intruder) livingRoom.classList.add(activeClass);
+    }
+
+    // ---- Live CSI waveform chart ----
+    const CSI_COLORS = {
+        0: { line: '#a19a8e', fill: 'rgba(161,154,142,0.10)', signature: 'Noise floor' },
+        1: { line: '#f59e0b', fill: 'rgba(245,158,11,0.12)', signature: 'Motion spikes' },
+        2: { line: '#3b82f6', fill: 'rgba(59,130,246,0.10)', signature: 'Breathing band' },
+    };
+
+    const csiChart = new Chart(document.getElementById('csiChart').getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: Array.from({ length: 64 }, (_, i) => i),
+            datasets: [{
+                data: Array(64).fill(0),
+                borderColor: CSI_COLORS[0].line,
+                backgroundColor: CSI_COLORS[0].fill,
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.35,
+                fill: true,
+            }],
+        },
+        options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { grid: { color: 'rgba(120,113,108,0.08)' }, ticks: { display: false }, border: { display: false } },
+                y: { min: -6, max: 6, grid: { color: 'rgba(120,113,108,0.08)' }, ticks: { display: false }, border: { display: false } },
+            },
+            plugins: { legend: { display: false } },
+        },
+    });
+
+    function updateCsiChart(data) {
+        const style = CSI_COLORS[data.state] ?? CSI_COLORS[0];
+        const ds = csiChart.data.datasets[0];
+        ds.data = (data.csi && data.csi.length === 64) ? data.csi : Array(64).fill(0);
+        ds.borderColor = style.line;
+        ds.backgroundColor = style.fill;
+        csiChart.update('none');
+
+        if (data.state === 2) {
+            csiSignatureChip.className = 'chip bg-blue-500/15 text-blue-600 dark:text-blue-400';
+        } else if (data.state === 1) {
+            csiSignatureChip.className = 'chip bg-amber-500/15 text-amber-600 dark:text-amber-400';
+        } else {
+            csiSignatureChip.className = 'chip bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400';
+        }
+        setText(csiSignatureChip, style.signature);
+    }
+
+    // ---- Terminal ----
+    let pktCount = 0;
+    const TERM_STATE_CLASS = {
+        0: 'text-stone-300',
+        1: 'text-amber-400 font-bold',
+        2: 'text-blue-400 font-bold',
+    };
+
+    function termAppend(html) {
+        const line = document.createElement('div');
+        line.className = 'term-line whitespace-pre-wrap break-all';
+        line.innerHTML = html;
+        terminalBody.appendChild(line);
+        while (terminalBody.children.length > 140) terminalBody.firstChild.remove();
+        terminalBody.scrollTop = terminalBody.scrollHeight;
+    }
+
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    }
+
+    function termLogPacket(d) {
+        pktCount++;
+        termPktCount.textContent = pktCount;
+        const t = new Date((d.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour12: false });
+        const amps = (d.csi || []).slice(0, 6).join(', ');
+        const cls = TERM_STATE_CLASS[d.state] || TERM_STATE_CLASS[0];
+        termAppend(
+            `<span class="text-stone-500">[${t}]</span> ` +
+            `<span class="text-cyan-400">PKT#${String(d.seq ?? pktCount).padStart(4, '0')}</span> ` +
+            `<span class="text-stone-400">${esc(d.packet_size ?? 64)}B</span> ` +
+            `<span class="text-stone-400">RSSI ${esc(d.rssi ?? '--')}dBm</span> → ` +
+            `<span class="${cls}">STATE ${d.state} ${esc((d.label || '').toUpperCase())}</span> ` +
+            `<span class="text-stone-500">conf=${esc(d.confidence ?? '-')} amp[..]=</span>` +
+            `<span class="text-emerald-400">${amps}${(d.csi || []).length > 6 ? ', …' : ''}</span>`
+        );
+    }
+
+    function termLogEvent(entry) {
+        const t = new Date((entry.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString([], { hour12: false });
+        termAppend(`<span class="text-stone-500">[${t}]</span> <span class="text-violet-400">EVENT</span> <span class="text-stone-300">${esc(entry.message)}</span>`);
+    }
+
+    // ---- Occupancy timeline ----
+    let HISTORY = [];
+    const historyCanvas = document.getElementById('historyCanvas');
+    const historyEmpty = document.getElementById('historyEmpty');
+    const hctx = historyCanvas.getContext('2d');
+    const SEG_COLORS = { 0: 'rgba(161,154,142,0.55)', 1: '#f59e0b', 2: '#3b82f6' };
+
+    function pushHistoryLocal(state, timestamp) {
+        if (!HISTORY.length || HISTORY[HISTORY.length - 1].state !== state) {
+            HISTORY.push({ state, timestamp });
+            if (HISTORY.length > 2000) HISTORY.shift();
+        }
+    }
+
+    function drawHistory() {
+        if (!HISTORY.length) { historyEmpty.style.display = ''; return; }
+        historyEmpty.style.display = 'none';
+
+        const dpr = window.devicePixelRatio || 1;
+        const W = historyCanvas.clientWidth, H = historyCanvas.clientHeight;
+        if (!W || !H) return;
+        historyCanvas.width = W * dpr;
+        historyCanvas.height = H * dpr;
+        hctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const now = HISTORY[HISTORY.length - 1].timestamp + 1;
+        const span = Math.min(Math.max(now - HISTORY[0].timestamp, 180), 86400);
+        const padX = 6, trackY = H * 0.42, trackH = 14;
+        const x = t => padX + ((t - (now - span)) / span) * (W - padX * 2);
+
+        hctx.clearRect(0, 0, W, H);
+        hctx.beginPath();
+        hctx.roundRect(padX, trackY - trackH / 2, W - padX * 2, trackH, trackH / 2);
+        hctx.fillStyle = root.classList.contains('dark')
+            ? 'rgba(255,255,255,0.07)' : 'rgba(120,113,108,0.10)';
+        hctx.fill();
+
+        for (let i = 0; i < HISTORY.length; i++) {
+            const segStart = Math.max(HISTORY[i].timestamp, now - span);
+            const segEnd = i + 1 < HISTORY.length ? Math.min(HISTORY[i + 1].timestamp, now) : now;
+            if (segEnd <= segStart) continue;
+            hctx.beginPath();
+            hctx.lineCap = 'round';
+            hctx.lineWidth = trackH - 4;
+            hctx.strokeStyle = SEG_COLORS[HISTORY[i].state];
+            hctx.moveTo(x(segStart), trackY);
+            hctx.lineTo(x(segEnd), trackY);
+            hctx.stroke();
+        }
+
+        hctx.beginPath();
+        hctx.arc(x(now), trackY, 4, 0, Math.PI * 2);
+        hctx.fillStyle = '#10b981';
+        hctx.fill();
+
+        hctx.font = '10px Inter, sans-serif';
+        hctx.fillStyle = '#a8a29e';
+        const ticks = 4;
+        for (let i = 0; i <= ticks; i++) {
+            const t = now - span + (span * i) / ticks;
+            const label = span <= 1800
+                ? `-${Math.round((now - t) / 60)}m`
+                : new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            hctx.textAlign = i === 0 ? 'left' : i === ticks ? 'right' : 'center';
+            hctx.fillText(label, x(t), H - 4);
+        }
+    }
+    window.addEventListener('resize', drawHistory);
+    setInterval(() => { if (currentRoute() === 'floorplan') drawHistory(); }, 5000);
+
+    // ---- Devices ----
+    function autoChip(el, isAuto) {
+        el.textContent = isAuto ? 'Auto' : 'Manual';
+        el.className = 'chip cursor-pointer ' + (isAuto
+            ? 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+            : 'bg-amber-500/15 text-amber-600 dark:text-amber-400');
+        el.title = isAuto ? '' : 'Click to restore Auto';
+    }
+
+    function powerChip(name, on) {
+        bindAll(`${name}-power`, el => {
+            el.textContent = on ? 'Active' : 'Standby';
+            el.className = 'power-chip chip ' + (on
+                ? 'bg-emerald-600/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+                : 'bg-stone-900/5 text-stone-500 dark:bg-white/10 dark:text-stone-400');
+        });
+    }
+
+    function renderDevice(name, device) {
+        if (name === 'hvac') {
+            hvacToggle.checked = device.on;
+            hvacTemp.textContent = device.temp + '°';
+            document.querySelectorAll('.temp-step').forEach(b => b.disabled = !device.on);
+            autoChip(hvacModeChip, device.mode === 'auto');
+            hvacSub.textContent = device.mode === 'auto' ? 'Following sensors' : `Manual · ${device.temp}°C`;
+            powerChip('hvac', device.on);
+        } else {
+            lightingToggle.checked = device.on;
+            lightingSlider.value = device.brightness;
+            lightingSlider.disabled = !device.on;
+            lightingValue.textContent = device.brightness + '%';
+            autoChip(lightingModeChip, device.mode === 'auto');
+            lightingSub.textContent = device.mode === 'auto' ? 'Following sensors' : `Manual · ${device.brightness}% brightness`;
+            powerChip('lighting', device.on);
+        }
+    }
+
+    async function postJSON(url, body) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        return res.json();
+    }
+
+    awayModeToggle.addEventListener('change', () => postJSON('/api/away', { enabled: awayModeToggle.checked }));
+
+    hvacToggle.addEventListener('change', async () => {
+        const res = await postJSON('/api/devices/hvac', { on: hvacToggle.checked });
+        if (res && res.device) renderDevice('hvac', res.device);
+    });
+    lightingToggle.addEventListener('change', async () => {
+        const res = await postJSON('/api/devices/lighting', { on: lightingToggle.checked });
+        if (res && res.device) renderDevice('lighting', res.device);
+    });
+    lightingSlider.addEventListener('change', async () => {
+        const res = await postJSON('/api/devices/lighting', { brightness: +lightingSlider.value });
+        if (res && res.device) renderDevice('lighting', res.device);
+    });
+
+    document.querySelectorAll('.temp-step').forEach(btn => btn.addEventListener('click', async () => {
+        const res = await postJSON('/api/devices/hvac', { temp: parseInt(hvacTemp.textContent) + Number(btn.dataset.delta) });
+        if (res && res.device) renderDevice('hvac', res.device);
+    }));
+
+    [hvacModeChip, lightingModeChip].forEach((chip, i) => {
+        chip.addEventListener('click', async () => {
+            const name = i === 0 ? 'hvac' : 'lighting';
+            const res = await postJSON(`/api/devices/${name}/auto`, {});
+            if (res && res.device) renderDevice(name, res.device);
+        });
+    });
+
+    // ---- Activity feed ----
+    const ACTIVITY_ICONS = {
+        sensor: ['radar', 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400'],
+        device: ['plug-zap', 'bg-violet-500/10 text-violet-600 dark:text-violet-400'],
+        system: ['shield', 'bg-red-500/10 text-red-500'],
+    };
+
+    function timeAgo(ts) {
+        const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+        if (s < 5) return 'just now';
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+        return `${Math.floor(s / 86400)}d ago`;
+    }
+
+    let activities = [];
+
+    function renderActivity() {
+        if (!activities.length) {
+            activityList.innerHTML = '<li class="py-2 text-xs text-stone-400 dark:text-stone-500">No activity yet…</li>';
+        } else {
+            activityList.innerHTML = activities.map(a => {
+                const [icon, color] = ACTIVITY_ICONS[a.kind] || ACTIVITY_ICONS.system;
+                return `<li class="flex items-start gap-3 rounded-xl px-2 py-2 hover:bg-stone-900/[0.03] dark:hover:bg-white/[0.04]">
+                    <span class="mt-0.5 rounded-lg ${color} p-1.5"><i data-lucide="${icon}" class="h-3.5 w-3.5"></i></span>
+                    <span class="flex-1 leading-snug">${a.message}</span>
+                    <span class="shrink-0 pt-0.5 text-[11px] text-stone-400 dark:text-stone-500">${timeAgo(a.timestamp)}</span>
+                </li>`;
+            }).join('');
+            lucide.createIcons();
+        }
+        document.getElementById('statSensor').textContent =
+            activities.filter(a => a.kind === 'sensor').length;
+        document.getElementById('statDevice').textContent =
+            activities.filter(a => a.kind === 'device').length;
+        document.getElementById('statSystem').textContent =
+            activities.filter(a => a.kind === 'system').length;
+    }
+
+    setInterval(renderActivity, 15000);
+
+    // ---- State application ----
+    function applySnapshot(data) {
+        currentState = data.sensor.state;
+        setAwayUI(!!(data.away_mode && data.away_mode.enabled));
+        setEnergy(data.energy_saved ?? 0);
+        bindAll('people', el => { el.textContent = String(data.people ?? 5); });
+        Object.entries(data.devices || {}).forEach(([name, device]) => renderDevice(name, device));
+        if (data.history) { HISTORY = data.history.slice(); drawHistory(); }
+        if (data.activity) {
+            activities = data.activity.slice(0, 30);
+            renderActivity();
+        }
+        if (data.sensor.timestamp) {
+            lastUpdated.textContent = 'Last update: ' + new Date(data.sensor.timestamp * 1000).toLocaleTimeString();
+            updateCsiChart(data.sensor);
+            termLogPacket(data.sensor);
+            termAppend('<span class="text-stone-500">[boot] stream attached — showing live packets</span>');
+        }
+        bootstrapped = true;
+    }
+
+    // ---- WebSocket wiring ----
+    const socket = io();
+
+    socket.on('connect', () => {
+        connPillDot.className = 'h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse';
+        sideDot.className = 'h-2 w-2 rounded-full bg-emerald-500 animate-pulse';
+        document.getElementById('connectionDotM').className = 'h-2 w-2 rounded-full bg-emerald-500 animate-pulse';
+        connPillText.textContent = 'Connected';
+        sideConnText.textContent = 'Live';
+        document.getElementById('connectionTextM').textContent = 'Live';
+    });
+
+    socket.on('disconnect', () => {
+        connPillDot.className = 'h-2.5 w-2.5 rounded-full bg-red-500';
+        sideDot.className = 'h-2 w-2 rounded-full bg-red-500';
+        document.getElementById('connectionDotM').className = 'h-2 w-2 rounded-full bg-red-500';
+        connPillText.textContent = 'Disconnected';
+        sideConnText.textContent = 'Offline';
+        document.getElementById('connectionTextM').textContent = 'Offline';
+    });
+
+    socket.on('initial_state', applySnapshot);
+
+    socket.on('sensor_update', (data) => {
+        const wasAlert = currentState === 1 && awayArmed;
+        currentState = data.state;
+        renderStatus(currentState);
+        updateCsiChart(data);
+        termLogPacket(data);
+        pushHistoryLocal(currentState, data.timestamp);
+        drawHistory();
+        if (data.energy_saved !== undefined) setEnergy(data.energy_saved);
+        lastUpdated.textContent = 'Last update: ' + new Date((data.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString();
+
+        const isAlert = currentState === 1 && awayArmed;
+        if (bootstrapped && isAlert && !wasAlert) {
+            toast('Intruder detected! Motion while Away Mode is armed.', 'alert');
+            bindAll('last-alert', el => {
+                el.classList.remove('hidden');
+                el.textContent = 'Last alert ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            });
+        }
+    });
+
+    socket.on('device_update', ({ name, device }) => renderDevice(name, device));
+
+    socket.on('people_update', ({ count }) => bindAll('people', el => tweenNumber(el, count, 0)));
+
+    socket.on('away_update', ({ enabled }) => setAwayUI(enabled));
+
+    socket.on('activity', (entry) => {
+        activities.unshift(entry);
+        activities = activities.slice(0, 30);
+        renderActivity();
+        termLogEvent(entry);
+        if (bootstrapped) toast(entry.message, entry.kind);
+    });
+
+    // ---- Boot ----
+    fetch('/api/state').then(r => r.json()).then(data => { if (!bootstrapped) applySnapshot(data); }).catch(() => {});
+    renderStatus(currentState);
+    renderRoute();
+</script>
+</body>
+</html>
